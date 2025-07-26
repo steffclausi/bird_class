@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let audioFiles = [];
     let currentIndex = 0;
     let categorization = {};
-    let folderIdentifier = ''; // Eindeutiger Name für den Ordner
+    let folderIdentifier = '';
     let audioContext;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const ALLOWED_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "m4a", "opus"];
@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const uploadSection = document.getElementById('upload-section');
     const mainApp = document.getElementById('main-app');
     const finishSection = document.getElementById('finish-section');
-    
     const startButton = document.getElementById('start-button');
     const fileInput = document.getElementById('file-input');
     const audioPlayer = document.getElementById('audio-player');
@@ -23,17 +22,62 @@ document.addEventListener('DOMContentLoaded', () => {
     const addClassButton = document.getElementById('add-class-button');
     const downloadButton = document.getElementById('download-button');
     const restartButton = document.getElementById('restart-button');
-
     const canvas = document.getElementById('spectrogram-canvas');
     const canvasCtx = canvas.getContext('2d');
 
-    // ## Kernfunktionen ##
+    // ====================================================================
+    // ## NEU: Helferfunktionen für die Mel-Skala ##
+    // ====================================================================
 
+    /** Wandelt eine Frequenz von Hertz in Mel um. */
+    function hzToMel(hz) {
+        return 2595 * Math.log10(1 + hz / 700);
+    }
+
+    /** Wandelt einen Mel-Wert zurück in Hertz um. */
+    function melToHz(mel) {
+        return 700 * (Math.pow(10, mel / 2595) - 1);
+    }
+
+    /** Erstellt eine Mel-Filterbank. */
+    function createMelFilterbank(fftSize, sampleRate, numBands, minHz, maxHz) {
+        const minMel = hzToMel(minHz);
+        const maxMel = hzToMel(maxHz);
+        const melPoints = new Float32Array(numBands + 2);
+        const hzPoints = new Float32Array(numBands + 2);
+        const fftBinIndices = new Uint32Array(numBands + 2);
+        const filterbank = [];
+
+        // 1. Erzeuge linear verteilte Punkte auf der Mel-Skala
+        for (let i = 0; i < melPoints.length; i++) {
+            melPoints[i] = minMel + i * (maxMel - minMel) / (numBands + 1);
+            hzPoints[i] = melToHz(melPoints[i]);
+            fftBinIndices[i] = Math.floor((fftSize + 1) * hzPoints[i] / sampleRate);
+        }
+
+        // 2. Erzeuge die dreieckigen Filter
+        for (let i = 0; i < numBands; i++) {
+            const filter = new Float32Array(fftSize / 2);
+            const startIdx = fftBinIndices[i];
+            const centerIdx = fftBinIndices[i + 1];
+            const endIdx = fftBinIndices[i + 2];
+
+            for (let j = startIdx; j < centerIdx; j++) {
+                filter[j] = (j - startIdx) / (centerIdx - startIdx);
+            }
+            for (let j = centerIdx; j < endIdx; j++) {
+                filter[j] = (endIdx - j) / (endIdx - centerIdx);
+            }
+            filterbank.push(filter);
+        }
+        return filterbank;
+    }
+
+    // ## Kernfunktionen (größtenteils unverändert) ##
     function resetApp() {
         uploadSection.classList.remove('hidden');
         mainApp.classList.add('hidden');
         finishSection.classList.add('hidden');
-        
         audioFiles = [];
         currentIndex = 0;
         categorization = {};
@@ -42,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mainTitle.textContent = 'Lokaler Audio Kategorisierer';
         categoryButtonsContainer.innerHTML = '';
     }
-    
+
     function initializeCategorization() {
         const savedProgress = JSON.parse(localStorage.getItem(`progress-${folderIdentifier}`));
         if (savedProgress) {
@@ -73,7 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
         audioPlayer.play().catch(e => console.error("Abspielfehler:", e));
         await drawSpectrogram(file);
     }
-
+    
+    // ... weitere unveränderte Funktionen (categorize, showFinishScreen, saveProgress, etc.) ...
     function categorize(category) {
         const filename = audioFiles[currentIndex].name;
         categorization[filename] = category;
@@ -81,7 +126,6 @@ document.addEventListener('DOMContentLoaded', () => {
         saveProgress();
         loadNextAudio();
     }
-    
     function showFinishScreen() {
         mainApp.classList.add('hidden');
         finishSection.classList.remove('hidden');
@@ -90,15 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
             `Du hast ${Object.keys(categorization).length} Dateien in ${categoryCount} Kategorien sortiert.`;
         localStorage.removeItem(`progress-${folderIdentifier}`);
     }
-
-    // ## Fortschritt Speichern & Laden ##
     function saveProgress() {
         const categories = [...categoryButtonsContainer.children].map(btn => btn.textContent);
         const progress = { currentIndex, categorization, categories };
         localStorage.setItem(`progress-${folderIdentifier}`, JSON.stringify(progress));
     }
-    
-    // ## Hilfsfunktionen & Event Listeners ##
     function createCategoryButton(categoryName) {
         if ([...categoryButtonsContainer.children].some(btn => btn.textContent === categoryName)) return;
         const button = document.createElement('button');
@@ -106,11 +146,9 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', () => categorize(categoryName));
         categoryButtonsContainer.appendChild(button);
     }
-    
     startButton.addEventListener('click', () => {
         if (!fileInput.files || fileInput.files.length === 0) {
-            alert("Bitte wähle zuerst einen Ordner aus.");
-            return;
+            alert("Bitte wähle zuerst einen Ordner aus."); return;
         }
         const allFiles = [...fileInput.files];
         audioFiles = allFiles.filter(file => {
@@ -118,23 +156,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return ALLOWED_EXTENSIONS.includes(extension);
         }).sort((a, b) => a.name.localeCompare(b.name));
         if (audioFiles.length === 0) {
-            alert("Der ausgewählte Ordner enthält keine unterstützten Audiodateien.");
-            return;
+            alert("Der ausgewählte Ordner enthält keine unterstützten Audiodateien."); return;
         }
         folderIdentifier = audioFiles[0].webkitRelativePath.split('/')[0];
         mainTitle.textContent = `Kategorisiere: ${folderIdentifier}`;
         initializeCategorization();
     });
-
     addClassButton.addEventListener('click', () => {
         const newClassName = newClassEntry.value.trim();
-        if (newClassName) {
-            createCategoryButton(newClassName);
-            newClassEntry.value = '';
-            saveProgress();
-        }
+        if (newClassName) { createCategoryButton(newClassName); newClassEntry.value = ''; saveProgress(); }
     });
-
     downloadButton.addEventListener('click', () => {
         const jsonString = JSON.stringify(categorization, null, 2);
         const blob = new Blob([jsonString], { type: "application/json" });
@@ -145,86 +176,90 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         URL.revokeObjectURL(url);
     });
-    
     restartButton.addEventListener('click', resetApp);
     document.getElementById('replay-button').addEventListener('click', () => audioPlayer.play());
     newClassEntry.addEventListener('keypress', (e) => { if (e.key === 'Enter') addClassButton.click(); });
 
+
     // ====================================================================
-    // ## NEU: Überarbeitete Funktion zur Spektrogramm-Erstellung ##
+    // ## Überarbeitete Funktion zur Mel-Spektrogramm-Erstellung ##
     // ====================================================================
     async function drawSpectrogram(file) {
         if (!audioContext) audioContext = new AudioContext();
-
-        // Canvas leeren und Lade-Status anzeigen
         canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
         canvasCtx.font = "16px Arial";
         canvasCtx.fillStyle = "black";
         canvasCtx.textAlign = "center";
-        canvasCtx.fillText("Spektrogramm wird generiert...", canvas.width/2, canvas.height/2);
+        canvasCtx.fillText("Mel-Spektrogramm wird generiert...", canvas.width/2, canvas.height/2);
 
         const arrayBuffer = await file.arrayBuffer();
         try {
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const audioBuffer = await audioContext.decodeData(arrayBuffer);
+            const fftSize = 2048;
+            const sampleRate = audioBuffer.sampleRate;
+            
+            // ** NEU: Parameter für Mel-Filterbank **
+            const numMelBands = 128; // Vertikale Auflösung des Mel-Spektrogramms
+            const minHz = 100;       // Minimale Frequenz laut Anforderung
+            const maxHz = 5000;      // Maximale Frequenz laut Anforderung
 
-            // Die FFT-Größe bestimmt die vertikale Auflösung (Frequenz)
-            const fftSize = 2048; 
+            // ** NEU: Filterbank erstellen **
+            const melFilterbank = createMelFilterbank(fftSize, sampleRate, numMelBands, minHz, maxHz);
 
-            // Ein OfflineAudioContext analysiert die Datei so schnell wie möglich im Hintergrund
-            const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * 44100, 44100);
+            const offlineCtx = new OfflineAudioContext(1, audioBuffer.length, sampleRate);
             const source = offlineCtx.createBufferSource();
             source.buffer = audioBuffer;
-
-            // Der Analyser-Knoten führt die FFT durch
             const analyser = offlineCtx.createAnalyser();
             analyser.fftSize = fftSize;
-            const frequencyBinCount = analyser.frequencyBinCount; // = fftSize / 2
-
-            // Ein ScriptProcessorNode zerlegt das Signal in Blöcke
-            // HINWEIS: Dies ist eine ältere API, aber für diesen Zweck am einfachsten
             const processor = offlineCtx.createScriptProcessor(fftSize, 1, 1);
             
-            const spectrogramData = []; // Hier speichern wir alle FFT-Ergebnisse (Spalten)
-
-            // Dieser Event-Handler wird für jeden Audio-Block aufgerufen
+            const linearSpectrogram = [];
             processor.onaudioprocess = () => {
-                const data = new Uint8Array(frequencyBinCount);
+                const data = new Uint8Array(analyser.frequencyBinCount);
                 analyser.getByteFrequencyData(data);
-                spectrogramData.push([...data]); // Kopie des Ergebnisses speichern
+                linearSpectrogram.push([...data]);
             };
             
-            // Die Knoten verbinden: Quelle -> Analyser -> Prozessor -> Ziel
             source.connect(analyser);
             analyser.connect(processor);
             processor.connect(offlineCtx.destination);
-            
             source.start(0);
-            await offlineCtx.startRendering(); // Analyse im Hintergrund starten
+            await offlineCtx.startRendering();
 
-            // -- Das eigentliche Zeichnen auf das Canvas --
+            // ** NEU: Lineares Spektrogramm in Mel-Spektrogramm umwandeln **
+            const melSpectrogram = [];
+            let maxMelEnergy = 0;
+            for (const linearFrame of linearSpectrogram) {
+                const melFrame = new Float32Array(numMelBands);
+                for (let i = 0; i < numMelBands; i++) {
+                    let melEnergy = 0;
+                    for (let j = 0; j < linearFrame.length; j++) {
+                        melEnergy += linearFrame[j] * melFilterbank[i][j];
+                    }
+                    melFrame[i] = melEnergy;
+                    if (melEnergy > maxMelEnergy) maxMelEnergy = melEnergy;
+                }
+                melSpectrogram.push(melFrame);
+            }
+
+            // -- Das eigentliche Zeichnen des Mel-Spektrogramms --
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            const numSlices = melSpectrogram.length;
             
-            const numSlices = spectrogramData.length; // Anzahl der vertikalen Spalten
-            const numFreqs = spectrogramData[0].length; // Anzahl der Frequenzbänder (vertikal)
-            
-            for (let i = 0; i < numSlices; i++) { // Jede Spalte (Zeit) durchgehen
-                for (let j = 0; j < numFreqs; j++) { // Jedes Frequenzband (Pixel in der Spalte) durchgehen
-                    const value = spectrogramData[i][j]; // Amplitude (0-255)
-                    const percent = value / 255;
+            for (let i = 0; i < numSlices; i++) {
+                for (let j = 0; j < numMelBands; j++) {
+                    // Energie auf einen Wert zwischen 0 und 1 normalisieren (logarithmisch)
+                    const value = Math.log10(1 + melSpectrogram[i][j]) / Math.log10(1 + maxMelEnergy);
                     
-                    // Farbwert berechnen (z.B. Graustufen oder ein Farbverlauf)
-                    // Hier ein klassischer "Wärme"-Farbverlauf: schwarz -> blau -> rot -> gelb
-                    const hue = 260 * (1 - percent); // 260 (blau) -> 0 (rot)
+                    const hue = 260 * (1 - value);
                     const saturation = '100%';
-                    const lightness = `${50 * percent}%`; // Helligkeit von Intensität abhängig machen
-
+                    const lightness = `${50 * value}%`;
                     canvasCtx.fillStyle = `hsl(${hue}, ${saturation}, ${lightness})`;
 
-                    // Position berechnen und Pixel zeichnen
                     const x = (i / numSlices) * canvas.width;
-                    const y = canvas.height - (j / numFreqs) * canvas.height;
-                    const barWidth = (canvas.width / numSlices) + 1; // +1, um Lücken zu vermeiden
-                    const barHeight = (canvas.height / numFreqs) + 1;
+                    const y = canvas.height - (j / numMelBands) * canvas.height;
+                    const barWidth = (canvas.width / numSlices) + 1;
+                    const barHeight = (canvas.height / numMelBands) + 1;
 
                     canvasCtx.fillRect(x, y, barWidth, barHeight);
                 }
