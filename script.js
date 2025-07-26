@@ -85,14 +85,51 @@ document.addEventListener('DOMContentLoaded', () => {
     // ## Fortschritt Speichern & Laden (localStorage & JSON) ##
     // ====================================================================
 
-    function saveProgressToLocalStorage() {
-        const progress = {
-            categorization,
-            categories: [...categoryButtonsContainer.children].map(btn => btn.textContent)
-        };
-        localStorage.setItem(`progress-${folderIdentifier}`, JSON.stringify(progress));
-    }
+    /**
+	 * Sendet den aktuellen Fortschritt an den Python-Server zum Speichern.
+	 */
+	/**
+	 * Sendet den aktuellen Fortschritt an den externen Python-Server zum Speichern.
+	 */
+	async function saveProgressToServer() {
+		// ! WICHTIG: Ersetze diese URL durch die deines externen Servers!
+		const serverUrl = 'https://deine-app.onrender.com'; // Beispiel-URL von Render
 
+		const progress = {
+			categorization,
+			categories: [...categoryButtonsContainer.children].map(btn => btn.textContent)
+		};
+		
+		const payload = {
+			folder_identifier: folderIdentifier,
+			progress: progress
+		};
+
+		try {
+			const response = await fetch(`${serverUrl}/save_json`, { // Die URL wird hier zusammengesetzt
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(payload)
+			});
+
+			// Der Rest der Funktion bleibt gleich...
+			const result = await response.json();
+
+			if (response.ok) {
+				console.log('Server-Antwort:', result.message);
+				const originalText = saveJsonButton.textContent;
+				saveJsonButton.textContent = 'Gespeichert!';
+				setTimeout(() => { saveJsonButton.textContent = originalText; }, 2000);
+			} else {
+				throw new Error(result.error || 'Unbekannter Fehler');
+			}
+		} catch (error) {
+			console.error('Fehler beim Senden der Daten an den Server:', error);
+			alert('Fehler: Fortschritt konnte nicht auf dem Server gespeichert werden.');
+		}
+	}
     function downloadProgressJSON() {
         // Diese Funktion wird für den manuellen Speichern-Button und am Ende verwendet
         const progress = {
@@ -188,9 +225,8 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
     });
     
-    saveJsonButton.addEventListener('click', downloadProgressJSON);
-    downloadButton.addEventListener('click', downloadProgressJSON); // End-Button nutzt dieselbe Funktion
-
+    saveJsonButton.addEventListener('click', saveProgressToServer);
+	downloadButton.addEventListener('click', saveProgressToServer); // End-Button macht nun das Gleiche
     // Kleinere Event-Listener
     addClassButton.addEventListener('click', () => {
         const newClassName = newClassEntry.value.trim();
@@ -214,105 +250,134 @@ document.addEventListener('DOMContentLoaded', () => {
     function hzToMel(hz) { return 2595 * Math.log10(1 + hz / 700); }
     function melToHz(mel) { return 700 * (Math.pow(10, mel / 2595) - 1); }
 
-    function createMelFilterbank(fftSize, sampleRate, numBands, minHz, maxHz) {
-        const minMel = hzToMel(minHz);
-        const maxMel = hzToMel(maxHz);
-        const melPoints = new Float32Array(numBands + 2);
-        const hzPoints = new Float32Array(numBands + 2);
-        const fftBinIndices = new Uint32Array(numBands + 2);
-        const filterbank = [];
-        for (let i = 0; i < melPoints.length; i++) {
-            melPoints[i] = minMel + i * (maxMel - minMel) / (numBands + 1);
-            hzPoints[i] = melToHz(melPoints[i]);
-            fftBinIndices[i] = Math.floor((fftSize + 1) * hzPoints[i] / sampleRate);
-        }
-        for (let i = 0; i < numBands; i++) {
-            const filter = new Float32Array(fftSize / 2);
-            const startIdx = fftBinIndices[i], centerIdx = fftBinIndices[i + 1], endIdx = fftBinIndices[i + 2];
-            for (let j = startIdx; j < centerIdx; j++) filter[j] = (j - startIdx) / (centerIdx - startIdx);
-            for (let j = centerIdx; j < endIdx; j++) filter[j] = (endIdx - j) / (endIdx - centerIdx);
-            filterbank.push(filter);
-        }
-        return filterbank;
-    }
+		/**
+	 * Erstellt eine Mel-Filterbank zur Gewichtung der FFT-Ergebnisse.
+	 * @param {number} fftSize - Die Größe des FFT-Fensters.
+	 * @param {number} sampleRate - Die Abtastrate der Audiodatei.
+	 * @param {number} numBands - Die gewünschte Anzahl der Mel-Bänder (vertikale Auflösung).
+	 * @param {number} minHz - Die untere Frequenzgrenze.
+	 * @param {number} maxHz - Die obere Frequenzgrenze.
+	 * @returns {Array<Float32Array>} Die berechnete Filterbank.
+	 */
+	function createMelFilterbank(fftSize, sampleRate, numBands, minHz, maxHz) {
+		const minMel = hzToMel(minHz);
+		const maxMel = hzToMel(maxHz);
+		const melPoints = new Float32Array(numBands + 2);
+		const hzPoints = new Float32Array(numBands + 2);
+		const fftBinIndices = new Uint32Array(numBands + 2);
+		const filterbank = [];
 
-    async function drawSpectrogram(file) {
-        if (!audioContext) audioContext = new AudioContext();
-        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-        canvasCtx.font = "16px Arial";
-        canvasCtx.fillStyle = "black";
-        canvasCtx.textAlign = "center";
-        canvasCtx.fillText("Mel-Spektrogramm wird generiert...", canvas.width/2, canvas.height/2);
+		for (let i = 0; i < melPoints.length; i++) {
+			melPoints[i] = minMel + i * (maxMel - minMel) / (numBands + 1);
+			hzPoints[i] = melToHz(melPoints[i]);
+			fftBinIndices[i] = Math.floor((fftSize + 1) * hzPoints[i] / sampleRate);
+		}
 
-        const arrayBuffer = await file.arrayBuffer();
-        try {
-            // ** KORREKTUR 1: `decodeAudioData` statt `decodeData` **
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            const fftSize = 2048;
-            const sampleRate = audioBuffer.sampleRate;
-            const numMelBands = 128, minHz = 100, maxHz = 5000;
-            const melFilterbank = createMelFilterbank(fftSize, sampleRate, numMelBands, minHz, maxHz);
+		for (let i = 0; i < numBands; i++) {
+			const filter = new Float32Array(fftSize / 2);
+			const startIdx = fftBinIndices[i];
+			const centerIdx = fftBinIndices[i + 1];
+			const endIdx = fftBinIndices[i + 2];
 
-            // ** KORREKTUR 2: `audioBuffer.length` und `sampleRate` direkt nutzen **
-            const offlineCtx = new OfflineAudioContext(1, audioBuffer.length, sampleRate);
-            const source = offlineCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            const analyser = offlineCtx.createAnalyser();
-            analyser.fftSize = fftSize;
-            const processor = offlineCtx.createScriptProcessor(fftSize, 1, 1);
-            
-            const linearSpectrogram = [];
-            processor.onaudioprocess = () => {
-                const data = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(data);
-                linearSpectrogram.push([...data]);
-            };
-            
-            source.connect(analyser);
-            analyser.connect(processor);
-            processor.connect(offlineCtx.destination);
-            source.start(0);
-            await offlineCtx.startRendering();
+			for (let j = startIdx; j < centerIdx; j++) {
+				filter[j] = (j - startIdx) / (centerIdx - startIdx);
+			}
+			for (let j = centerIdx; j < endIdx; j++) {
+				filter[j] = (endIdx - j) / (endIdx - centerIdx);
+			}
+			filterbank.push(filter);
+		}
+		return filterbank;
+	}
 
-            const melSpectrogram = [];
-            let maxMelEnergy = 0;
-            for (const linearFrame of linearSpectrogram) {
-                const melFrame = new Float32Array(numMelBands);
-                for (let i = 0; i < numMelBands; i++) {
-                    let melEnergy = 0;
-                    for (let j = 0; j < linearFrame.length; j++) {
-                        melEnergy += linearFrame[j] * melFilterbank[i][j];
-                    }
-                    melFrame[i] = melEnergy;
-                    if (melEnergy > maxMelEnergy) maxMelEnergy = melEnergy;
-                }
-                melSpectrogram.push(melFrame);
-            }
+		/**
+	 * Zeichnet das Mel-Spektrogramm einer Audiodatei auf das Canvas.
+	 * @param {File} file - Die zu analysierende Audiodatei.
+	 */
+	async function drawSpectrogram(file) {
+		if (!audioContext) audioContext = new AudioContext();
+		const canvas = document.getElementById('spectrogram-canvas');
+		const canvasCtx = canvas.getContext('2d');
 
-            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-            const numSlices = melSpectrogram.length;
-            
-            for (let i = 0; i < numSlices; i++) {
-                for (let j = 0; j < numMelBands; j++) {
-                    const value = Math.log10(1 + melSpectrogram[i][j]) / Math.log10(1 + maxMelEnergy);
-                    const hue = 260 * (1 - value);
-                    const saturation = '100%', lightness = `${50 * value}%`;
-                    canvasCtx.fillStyle = `hsl(${hue}, ${saturation}, ${lightness})`;
-                    const x = (i / numSlices) * canvas.width;
-                    const y = canvas.height - (j / numMelBands) * canvas.height;
-                    const barWidth = (canvas.width / numSlices) + 1;
-                    const barHeight = (canvas.height / numMelBands) + 1;
-                    canvasCtx.fillRect(x, y, barWidth, barHeight);
-                }
-            }
+		canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+		canvasCtx.font = "16px Arial";
+		canvasCtx.fillStyle = "black";
+		canvasCtx.textAlign = "center";
+		canvasCtx.fillText("Mel-Spektrogramm wird generiert...", canvas.width / 2, canvas.height / 2);
 
-        } catch (e) {
-            console.error('Fehler bei der Audio-Analyse:', e);
-            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-            canvasCtx.font = "16px Arial";
-            canvasCtx.fillStyle = "red";
-            canvasCtx.textAlign = "center";
-            canvasCtx.fillText("Audio konnte nicht analysiert werden.", canvas.width/2, canvas.height/2);
-        }
-    }
+		const arrayBuffer = await file.arrayBuffer();
+		try {
+			const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+			const fftSize = 2048;
+			const hopLength = 512; // Kleinere Hop-Länge für mehr zeitliche Auflösung (Überlappung)
+			const sampleRate = audioBuffer.sampleRate;
+			
+			const numMelBands = 128;
+			const minHz = 100;
+			const maxHz = 5000;
+
+			const melFilterbank = createMelFilterbank(fftSize, sampleRate, numMelBands, minHz, maxHz);
+			const pcmData = audioBuffer.getChannelData(0);
+			const numFrames = Math.floor((pcmData.length - fftSize) / hopLength) + 1;
+			const melSpectrogram = [];
+			let maxMelEnergy = 0;
+			
+			const analyser = audioContext.createAnalyser();
+			analyser.fftSize = fftSize;
+			
+			for (let i = 0; i < numFrames; i++) {
+				const start = i * hopLength;
+				const end = start + fftSize;
+				const pcmChunk = pcmData.subarray(start, end);
+
+				// Um AnalyserNode zu nutzen, muss ein Buffer und Source erstellt werden.
+				// Dies ist ein Workaround, um eine manuelle FFT-Bibliothek zu vermeiden.
+				const frameBuffer = audioContext.createBuffer(1, fftSize, sampleRate);
+				frameBuffer.copyToChannel(pcmChunk, 0);
+
+				const source = audioContext.createBufferSource();
+				source.buffer = frameBuffer;
+				source.connect(analyser);
+				source.start();
+
+				// Die Frequenzdaten für den aktuellen Frame auslesen
+				const linearFrame = new Uint8Array(analyser.frequencyBinCount);
+				analyser.getByteFrequencyData(linearFrame);
+				
+				// Auf Mel-Skala umrechnen
+				const melFrame = new Float32Array(numMelBands);
+				for (let j = 0; j < numMelBands; j++) {
+					let melEnergy = 0;
+					for (let k = 0; k < linearFrame.length; k++) {
+						melEnergy += linearFrame[k] * melFilterbank[j][k];
+					}
+					melFrame[j] = melEnergy;
+					if (melEnergy > maxMelEnergy) maxMelEnergy = melEnergy;
+				}
+				melSpectrogram.push(melFrame);
+			}
+
+			// Zeichnen des Spektrogramms
+			canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+			for (let i = 0; i < melSpectrogram.length; i++) {
+				for (let j = 0; j < numMelBands; j++) {
+					const value = Math.log10(1 + melSpectrogram[i][j]) / Math.log10(1 + maxMelEnergy);
+					const hue = 260 * (1 - value);
+					const lightness = `${50 * value}%`;
+					canvasCtx.fillStyle = `hsl(${hue}, 100%, ${lightness})`;
+					const x = (i / melSpectrogram.length) * canvas.width;
+					const y = canvas.height - (j / numMelBands) * canvas.height;
+					canvasCtx.fillRect(x, y, (canvas.width / melSpectrogram.length) + 1, (canvas.height / numMelBands) + 1);
+				}
+			}
+
+		} catch (e) {
+			console.error('Fehler bei der Audio-Analyse:', e);
+			canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+			canvasCtx.font = "16px Arial";
+			canvasCtx.fillStyle = "red";
+			canvasCtx.textAlign = "center";
+			canvasCtx.fillText("Audio konnte nicht analysiert werden.", canvas.width / 2, canvas.height / 2);
+		}
+	}
 });
