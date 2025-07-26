@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Kategorisierer (Offline)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Kategorisierer (Offline)</h1>
+
+        <div id="upload-section">
+            <p>Wähle hier alle lokalen Audiodateien aus, die du kategorisieren möchtest.</p>
+            <input type="file" id="file-input" multiple accept=".wav,.mp3,.flac,.ogg,.m4a,.opus">
+            <button id="start-button">Kategorisierung starten</button>
+        </div>
+
+        <div id="main-app" class="hidden">
+            <div id="info-panel">
+                <p id="file-info">Lädt...</p>
+                <audio id="audio-player" controls></audio>
+                <button id="replay-button">Wiederholen</button>
+            </div>
+
+            <div id="spectrogram-panel">
+                <canvas id="spectrogram-canvas" width="500" height="400"></canvas>
+            </div>
+
+            <div id="controls-panel">
+                <h3>Kategorien</h3>
+                <div id="category-buttons"></div>
+                <div class="new-class-form">
+                    <input type="text" id="new-class-entry" placeholder="Neue Kategorie...">
+                    <button id="add-class-button">Hinzufügen</button>
+                </div>
+            </div>
+
+            <button id="finish-button">Speichern & Beenden</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
