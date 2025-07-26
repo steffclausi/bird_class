@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadButton = document.getElementById('download-button');
     const restartButton = document.getElementById('restart-button');
 
-    // Canvas für Spektrogramm (unverändert)
     const canvas = document.getElementById('spectrogram-canvas');
     const canvasCtx = canvas.getContext('2d');
 
@@ -40,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         categorization = {};
         folderIdentifier = '';
         fileInput.value = ''; // Wichtig, damit derselbe Ordner erneut gewählt werden kann
-        mainTitle.textContent = 'Audio Kategorisierer';
+        mainTitle.textContent = 'Lokaler Audio Kategorisierer';
         categoryButtonsContainer.innerHTML = '';
     }
     
@@ -131,7 +130,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Filtere nur gültige Audiodateien
+        // Die 'files' sind Referenzen auf die lokalen Dateien. An dieser Stelle
+        // wird noch nichts gelesen, nur eine Liste der ausgewählten Dateien erstellt.
         const allFiles = [...fileInput.files];
         audioFiles = allFiles.filter(file => {
             const extension = file.name.split('.').pop().toLowerCase();
@@ -173,15 +173,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     restartButton.addEventListener('click', resetApp);
     
-    // Kleinere Event-Listener (unverändert)
     document.getElementById('replay-button').addEventListener('click', () => audioPlayer.play());
     newClassEntry.addEventListener('keypress', (e) => { if (e.key === 'Enter') addClassButton.click(); });
 
-    // Funktion zum Zeichnen des Spektrogramms (unverändert aus der Vorversion)
     async function drawSpectrogram(file) {
         if (!audioContext) audioContext = new AudioContext();
+        
+        // Erst hier wird der Inhalt der einzelnen Datei als 'ArrayBuffer'
+        // in den Arbeitsspeicher des Browsers gelesen.
         const arrayBuffer = await file.arrayBuffer();
         try {
+            // Die Verarbeitung der Audiodaten geschieht vollständig lokal.
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
             const offlineCtx = new OfflineAudioContext(1, audioBuffer.length, audioBuffer.sampleRate);
             const source = offlineCtx.createBufferSource();
