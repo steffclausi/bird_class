@@ -38,29 +38,23 @@ document.addEventListener('DOMContentLoaded', () => {
         currentIndex = 0;
         categorization = {};
         folderIdentifier = '';
-        fileInput.value = ''; // Wichtig, damit derselbe Ordner erneut gewählt werden kann
+        fileInput.value = '';
         mainTitle.textContent = 'Lokaler Audio Kategorisierer';
         categoryButtonsContainer.innerHTML = '';
     }
     
-    // Startet die App, nachdem die Dateien geladen sind
     function initializeCategorization() {
-        // Prüfe auf gespeicherten Fortschritt
         const savedProgress = JSON.parse(localStorage.getItem(`progress-${folderIdentifier}`));
-
         if (savedProgress) {
             const continue_ = confirm('Gespeicherter Fortschritt für diesen Ordner gefunden. Möchten Sie weitermachen?');
             if (continue_) {
-                // Lade den Fortschritt
                 currentIndex = savedProgress.currentIndex;
                 categorization = savedProgress.categorization;
                 savedProgress.categories.forEach(createCategoryButton);
             } else {
-                // Lösche alten Fortschritt, wenn Nutzer neu startet
                 localStorage.removeItem(`progress-${folderIdentifier}`);
             }
         }
-        
         uploadSection.classList.add('hidden');
         mainApp.classList.remove('hidden');
         loadNextAudio();
@@ -84,40 +78,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const filename = audioFiles[currentIndex].name;
         categorization[filename] = category;
         currentIndex++;
-        saveProgress(); // Fortschritt nach jeder Aktion speichern
+        saveProgress();
         loadNextAudio();
     }
     
     function showFinishScreen() {
         mainApp.classList.add('hidden');
         finishSection.classList.remove('hidden');
-        
         const categoryCount = new Set(Object.values(categorization)).size;
         document.getElementById('finish-summary').textContent = 
             `Du hast ${Object.keys(categorization).length} Dateien in ${categoryCount} Kategorien sortiert.`;
-        
-        // Lösche den gespeicherten Fortschritt, da die Aufgabe beendet ist
         localStorage.removeItem(`progress-${folderIdentifier}`);
     }
 
     // ## Fortschritt Speichern & Laden ##
-
     function saveProgress() {
         const categories = [...categoryButtonsContainer.children].map(btn => btn.textContent);
-        const progress = {
-            currentIndex,
-            categorization,
-            categories
-        };
+        const progress = { currentIndex, categorization, categories };
         localStorage.setItem(`progress-${folderIdentifier}`, JSON.stringify(progress));
     }
     
     // ## Hilfsfunktionen & Event Listeners ##
-
     function createCategoryButton(categoryName) {
-        if ([...categoryButtonsContainer.children].some(btn => btn.textContent === categoryName)) {
-            return;
-        }
+        if ([...categoryButtonsContainer.children].some(btn => btn.textContent === categoryName)) return;
         const button = document.createElement('button');
         button.textContent = categoryName;
         button.addEventListener('click', () => categorize(categoryName));
@@ -129,25 +112,17 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("Bitte wähle zuerst einen Ordner aus.");
             return;
         }
-
-        // Die 'files' sind Referenzen auf die lokalen Dateien. An dieser Stelle
-        // wird noch nichts gelesen, nur eine Liste der ausgewählten Dateien erstellt.
         const allFiles = [...fileInput.files];
         audioFiles = allFiles.filter(file => {
             const extension = file.name.split('.').pop().toLowerCase();
             return ALLOWED_EXTENSIONS.includes(extension);
         }).sort((a, b) => a.name.localeCompare(b.name));
-
         if (audioFiles.length === 0) {
             alert("Der ausgewählte Ordner enthält keine unterstützten Audiodateien.");
             return;
         }
-        
-        // Eindeutigen Namen für den Ordner aus dem Pfad ableiten
-        // file.webkitRelativePath ist z.B. "MeinMusikOrdner/song.mp3"
         folderIdentifier = audioFiles[0].webkitRelativePath.split('/')[0];
         mainTitle.textContent = `Kategorisiere: ${folderIdentifier}`;
-        
         initializeCategorization();
     });
 
@@ -156,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (newClassName) {
             createCategoryButton(newClassName);
             newClassEntry.value = '';
-            saveProgress(); // Auch neue Kategorien speichern
+            saveProgress();
         }
     });
 
@@ -166,52 +141,95 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `sortierung-${folderIdentifier}.json`; // Dateiname mit Ordnerbezug
+        a.download = `sortierung-${folderIdentifier}.json`;
         a.click();
         URL.revokeObjectURL(url);
     });
     
     restartButton.addEventListener('click', resetApp);
-    
     document.getElementById('replay-button').addEventListener('click', () => audioPlayer.play());
     newClassEntry.addEventListener('keypress', (e) => { if (e.key === 'Enter') addClassButton.click(); });
 
+    // ====================================================================
+    // ## NEU: Überarbeitete Funktion zur Spektrogramm-Erstellung ##
+    // ====================================================================
     async function drawSpectrogram(file) {
         if (!audioContext) audioContext = new AudioContext();
-        
-        // Erst hier wird der Inhalt der einzelnen Datei als 'ArrayBuffer'
-        // in den Arbeitsspeicher des Browsers gelesen.
+
+        // Canvas leeren und Lade-Status anzeigen
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+        canvasCtx.font = "16px Arial";
+        canvasCtx.fillStyle = "black";
+        canvasCtx.textAlign = "center";
+        canvasCtx.fillText("Spektrogramm wird generiert...", canvas.width/2, canvas.height/2);
+
         const arrayBuffer = await file.arrayBuffer();
         try {
-            // Die Verarbeitung der Audiodaten geschieht vollständig lokal.
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            const offlineCtx = new OfflineAudioContext(1, audioBuffer.length, audioBuffer.sampleRate);
+
+            // Die FFT-Größe bestimmt die vertikale Auflösung (Frequenz)
+            const fftSize = 2048; 
+
+            // Ein OfflineAudioContext analysiert die Datei so schnell wie möglich im Hintergrund
+            const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * 44100, 44100);
             const source = offlineCtx.createBufferSource();
             source.buffer = audioBuffer;
+
+            // Der Analyser-Knoten führt die FFT durch
             const analyser = offlineCtx.createAnalyser();
-            analyser.fftSize = 1024;
-            source.connect(analyser);
-            analyser.connect(offlineCtx.destination);
-            source.start();
-            await offlineCtx.startRendering();
+            analyser.fftSize = fftSize;
+            const frequencyBinCount = analyser.frequencyBinCount; // = fftSize / 2
 
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-
-            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-            canvasCtx.fillStyle = 'rgb(240, 240, 240)';
-            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+            // Ein ScriptProcessorNode zerlegt das Signal in Blöcke
+            // HINWEIS: Dies ist eine ältere API, aber für diesen Zweck am einfachsten
+            const processor = offlineCtx.createScriptProcessor(fftSize, 1, 1);
             
-            const barWidth = (canvas.width / dataArray.length);
-            let barHeight;
-            let x = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                barHeight = dataArray[i] / 255 * canvas.height;
-                const hue = (dataArray[i] / 255) * 240;
-                canvasCtx.fillStyle = `hsl(${240 - hue}, 100%, 50%)`;
-                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                x += barWidth;
+            const spectrogramData = []; // Hier speichern wir alle FFT-Ergebnisse (Spalten)
+
+            // Dieser Event-Handler wird für jeden Audio-Block aufgerufen
+            processor.onaudioprocess = () => {
+                const data = new Uint8Array(frequencyBinCount);
+                analyser.getByteFrequencyData(data);
+                spectrogramData.push([...data]); // Kopie des Ergebnisses speichern
+            };
+            
+            // Die Knoten verbinden: Quelle -> Analyser -> Prozessor -> Ziel
+            source.connect(analyser);
+            analyser.connect(processor);
+            processor.connect(offlineCtx.destination);
+            
+            source.start(0);
+            await offlineCtx.startRendering(); // Analyse im Hintergrund starten
+
+            // -- Das eigentliche Zeichnen auf das Canvas --
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const numSlices = spectrogramData.length; // Anzahl der vertikalen Spalten
+            const numFreqs = spectrogramData[0].length; // Anzahl der Frequenzbänder (vertikal)
+            
+            for (let i = 0; i < numSlices; i++) { // Jede Spalte (Zeit) durchgehen
+                for (let j = 0; j < numFreqs; j++) { // Jedes Frequenzband (Pixel in der Spalte) durchgehen
+                    const value = spectrogramData[i][j]; // Amplitude (0-255)
+                    const percent = value / 255;
+                    
+                    // Farbwert berechnen (z.B. Graustufen oder ein Farbverlauf)
+                    // Hier ein klassischer "Wärme"-Farbverlauf: schwarz -> blau -> rot -> gelb
+                    const hue = 260 * (1 - percent); // 260 (blau) -> 0 (rot)
+                    const saturation = '100%';
+                    const lightness = `${50 * percent}%`; // Helligkeit von Intensität abhängig machen
+
+                    canvasCtx.fillStyle = `hsl(${hue}, ${saturation}, ${lightness})`;
+
+                    // Position berechnen und Pixel zeichnen
+                    const x = (i / numSlices) * canvas.width;
+                    const y = canvas.height - (j / numFreqs) * canvas.height;
+                    const barWidth = (canvas.width / numSlices) + 1; // +1, um Lücken zu vermeiden
+                    const barHeight = (canvas.height / numFreqs) + 1;
+
+                    canvasCtx.fillRect(x, y, barWidth, barHeight);
+                }
             }
+
         } catch (e) {
             console.error('Fehler bei der Audio-Analyse:', e);
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
