@@ -9,11 +9,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const ALLOWED_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "m4a", "opus"];
 
     // ## HTML-Elemente ##
+    // (Die meisten sind gleich, hier die neuen)
+    const startButton = document.getElementById('start-button');
+    const loadJsonButton = document.getElementById('load-json-button');
+    const jsonLoadInput = document.getElementById('json-load-input');
+    const saveJsonButton = document.getElementById('save-json-button');
+    // (... Rest der Elemente)
     const mainTitle = document.getElementById('main-title');
     const uploadSection = document.getElementById('upload-section');
     const mainApp = document.getElementById('main-app');
     const finishSection = document.getElementById('finish-section');
-    const startButton = document.getElementById('start-button');
     const fileInput = document.getElementById('file-input');
     const audioPlayer = document.getElementById('audio-player');
     const fileInfo = document.getElementById('file-info');
@@ -25,55 +30,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('spectrogram-canvas');
     const canvasCtx = canvas.getContext('2d');
 
+
     // ====================================================================
-    // ## NEU: Helferfunktionen für die Mel-Skala ##
+    // ## Kernfunktionen & Zustandsmanagement ##
     // ====================================================================
 
-    /** Wandelt eine Frequenz von Hertz in Mel um. */
-    function hzToMel(hz) {
-        return 2595 * Math.log10(1 + hz / 700);
-    }
-
-    /** Wandelt einen Mel-Wert zurück in Hertz um. */
-    function melToHz(mel) {
-        return 700 * (Math.pow(10, mel / 2595) - 1);
-    }
-
-    /** Erstellt eine Mel-Filterbank. */
-    function createMelFilterbank(fftSize, sampleRate, numBands, minHz, maxHz) {
-        const minMel = hzToMel(minHz);
-        const maxMel = hzToMel(maxHz);
-        const melPoints = new Float32Array(numBands + 2);
-        const hzPoints = new Float32Array(numBands + 2);
-        const fftBinIndices = new Uint32Array(numBands + 2);
-        const filterbank = [];
-
-        // 1. Erzeuge linear verteilte Punkte auf der Mel-Skala
-        for (let i = 0; i < melPoints.length; i++) {
-            melPoints[i] = minMel + i * (maxMel - minMel) / (numBands + 1);
-            hzPoints[i] = melToHz(melPoints[i]);
-            fftBinIndices[i] = Math.floor((fftSize + 1) * hzPoints[i] / sampleRate);
-        }
-
-        // 2. Erzeuge die dreieckigen Filter
-        for (let i = 0; i < numBands; i++) {
-            const filter = new Float32Array(fftSize / 2);
-            const startIdx = fftBinIndices[i];
-            const centerIdx = fftBinIndices[i + 1];
-            const endIdx = fftBinIndices[i + 2];
-
-            for (let j = startIdx; j < centerIdx; j++) {
-                filter[j] = (j - startIdx) / (centerIdx - startIdx);
-            }
-            for (let j = centerIdx; j < endIdx; j++) {
-                filter[j] = (endIdx - j) / (endIdx - centerIdx);
-            }
-            filterbank.push(filter);
-        }
-        return filterbank;
-    }
-
-    // ## Kernfunktionen (größtenteils unverändert) ##
     function resetApp() {
         uploadSection.classList.remove('hidden');
         mainApp.classList.add('hidden');
@@ -83,25 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
         categorization = {};
         folderIdentifier = '';
         fileInput.value = '';
+        jsonLoadInput.value = '';
         mainTitle.textContent = 'Lokaler Audio Kategorisierer';
         categoryButtonsContainer.innerHTML = '';
-    }
-
-    function initializeCategorization() {
-        const savedProgress = JSON.parse(localStorage.getItem(`progress-${folderIdentifier}`));
-        if (savedProgress) {
-            const continue_ = confirm('Gespeicherter Fortschritt für diesen Ordner gefunden. Möchten Sie weitermachen?');
-            if (continue_) {
-                currentIndex = savedProgress.currentIndex;
-                categorization = savedProgress.categorization;
-                savedProgress.categories.forEach(createCategoryButton);
-            } else {
-                localStorage.removeItem(`progress-${folderIdentifier}`);
-            }
-        }
-        uploadSection.classList.add('hidden');
-        mainApp.classList.remove('hidden');
-        loadNextAudio();
+        loadJsonButton.disabled = true;
     }
 
     async function loadNextAudio() {
@@ -117,15 +63,15 @@ document.addEventListener('DOMContentLoaded', () => {
         audioPlayer.play().catch(e => console.error("Abspielfehler:", e));
         await drawSpectrogram(file);
     }
-    
-    // ... weitere unveränderte Funktionen (categorize, showFinishScreen, saveProgress, etc.) ...
+
     function categorize(category) {
         const filename = audioFiles[currentIndex].name;
         categorization[filename] = category;
         currentIndex++;
-        saveProgress();
+        saveProgressToLocalStorage();
         loadNextAudio();
     }
+    
     function showFinishScreen() {
         mainApp.classList.add('hidden');
         finishSection.classList.remove('hidden');
@@ -134,11 +80,125 @@ document.addEventListener('DOMContentLoaded', () => {
             `Du hast ${Object.keys(categorization).length} Dateien in ${categoryCount} Kategorien sortiert.`;
         localStorage.removeItem(`progress-${folderIdentifier}`);
     }
-    function saveProgress() {
-        const categories = [...categoryButtonsContainer.children].map(btn => btn.textContent);
-        const progress = { currentIndex, categorization, categories };
+
+    // ====================================================================
+    // ## Fortschritt Speichern & Laden (localStorage & JSON) ##
+    // ====================================================================
+
+    function saveProgressToLocalStorage() {
+        const progress = {
+            categorization,
+            categories: [...categoryButtonsContainer.children].map(btn => btn.textContent)
+        };
         localStorage.setItem(`progress-${folderIdentifier}`, JSON.stringify(progress));
     }
+
+    function downloadProgressJSON() {
+        // Diese Funktion wird für den manuellen Speichern-Button und am Ende verwendet
+        const progress = {
+            categorization,
+            categories: [...categoryButtonsContainer.children].map(btn => btn.textContent)
+        };
+        const jsonString = JSON.stringify(progress, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sortierung-${folderIdentifier || 'fortschritt'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+    
+    function restoreStateFromData(progressData) {
+        // Setzt den App-Zustand basierend auf geladenen Daten (von JSON oder localStorage)
+        categorization = progressData.categorization || {};
+        
+        categoryButtonsContainer.innerHTML = '';
+        (progressData.categories || []).forEach(createCategoryButton);
+
+        // Finde den nächsten zu bearbeitenden Index
+        currentIndex = audioFiles.findIndex(file => !categorization.hasOwnProperty(file.name));
+        if (currentIndex === -1) currentIndex = audioFiles.length; // Alle sind schon fertig
+
+        uploadSection.classList.add('hidden');
+        mainApp.classList.remove('hidden');
+        loadNextAudio();
+    }
+
+
+    // ====================================================================
+    // ## Event Listeners ##
+    // ====================================================================
+
+    fileInput.addEventListener('change', () => {
+        if (!fileInput.files || fileInput.files.length === 0) return;
+
+        const allFiles = [...fileInput.files];
+        audioFiles = allFiles.filter(file => {
+            const extension = file.name.split('.').pop().toLowerCase();
+            return ALLOWED_EXTENSIONS.includes(extension);
+        }).sort((a, b) => a.name.localeCompare(b.name));
+
+        if (audioFiles.length === 0) {
+            alert("Der ausgewählte Ordner enthält keine unterstützten Audiodateien.");
+            return;
+        }
+        
+        folderIdentifier = audioFiles[0].webkitRelativePath.split('/')[0];
+        mainTitle.textContent = `Bereit für: ${folderIdentifier}`;
+        loadJsonButton.disabled = false; // JSON-Ladebutton aktivieren
+    });
+
+    startButton.addEventListener('click', () => {
+        if (audioFiles.length === 0) {
+            alert("Bitte zuerst einen Ordner auswählen.");
+            return;
+        }
+        // Prüft, ob Fortschritt im localStorage vorhanden ist und startet die App
+        const savedProgress = JSON.parse(localStorage.getItem(`progress-${folderIdentifier}`));
+        if (savedProgress) {
+            if (confirm('Gespeicherter Fortschritt für diesen Ordner gefunden. Weitermachen?')) {
+                restoreStateFromData(savedProgress);
+            } else {
+                localStorage.removeItem(`progress-${folderIdentifier}`);
+                restoreStateFromData({}); // Startet mit leerem Zustand
+            }
+        } else {
+            restoreStateFromData({}); // Startet mit leerem Zustand
+        }
+    });
+
+    loadJsonButton.addEventListener('click', () => jsonLoadInput.click());
+
+    jsonLoadInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const progressData = JSON.parse(e.target.result);
+                mainTitle.textContent = `Kategorisiere: ${folderIdentifier}`;
+                restoreStateFromData(progressData);
+            } catch (err) {
+                alert("Fehler: Die ausgewählte Datei ist keine gültige JSON-Datei.");
+                console.error(err);
+            }
+        };
+        reader.readAsText(file);
+    });
+    
+    saveJsonButton.addEventListener('click', downloadProgressJSON);
+    downloadButton.addEventListener('click', downloadProgressJSON); // End-Button nutzt dieselbe Funktion
+
+    // Kleinere Event-Listener
+    addClassButton.addEventListener('click', () => {
+        const newClassName = newClassEntry.value.trim();
+        if (newClassName) { createCategoryButton(newClassName); newClassEntry.value = ''; saveProgressToLocalStorage(); }
+    });
+    restartButton.addEventListener('click', resetApp);
+    document.getElementById('replay-button').addEventListener('click', () => audioPlayer.play());
+    newClassEntry.addEventListener('keypress', (e) => { if (e.key === 'Enter') addClassButton.click(); });
     function createCategoryButton(categoryName) {
         if ([...categoryButtonsContainer.children].some(btn => btn.textContent === categoryName)) return;
         const button = document.createElement('button');
@@ -146,44 +206,36 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', () => categorize(categoryName));
         categoryButtonsContainer.appendChild(button);
     }
-    startButton.addEventListener('click', () => {
-        if (!fileInput.files || fileInput.files.length === 0) {
-            alert("Bitte wähle zuerst einen Ordner aus."); return;
-        }
-        const allFiles = [...fileInput.files];
-        audioFiles = allFiles.filter(file => {
-            const extension = file.name.split('.').pop().toLowerCase();
-            return ALLOWED_EXTENSIONS.includes(extension);
-        }).sort((a, b) => a.name.localeCompare(b.name));
-        if (audioFiles.length === 0) {
-            alert("Der ausgewählte Ordner enthält keine unterstützten Audiodateien."); return;
-        }
-        folderIdentifier = audioFiles[0].webkitRelativePath.split('/')[0];
-        mainTitle.textContent = `Kategorisiere: ${folderIdentifier}`;
-        initializeCategorization();
-    });
-    addClassButton.addEventListener('click', () => {
-        const newClassName = newClassEntry.value.trim();
-        if (newClassName) { createCategoryButton(newClassName); newClassEntry.value = ''; saveProgress(); }
-    });
-    downloadButton.addEventListener('click', () => {
-        const jsonString = JSON.stringify(categorization, null, 2);
-        const blob = new Blob([jsonString], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sortierung-${folderIdentifier}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-    restartButton.addEventListener('click', resetApp);
-    document.getElementById('replay-button').addEventListener('click', () => audioPlayer.play());
-    newClassEntry.addEventListener('keypress', (e) => { if (e.key === 'Enter') addClassButton.click(); });
-
-
+    
     // ====================================================================
-    // ## Überarbeitete Funktion zur Mel-Spektrogramm-Erstellung ##
+    // ## Mel-Spektrogramm Erstellung (mit Fehlerbehebung) ##
     // ====================================================================
+
+    function hzToMel(hz) { return 2595 * Math.log10(1 + hz / 700); }
+    function melToHz(mel) { return 700 * (Math.pow(10, mel / 2595) - 1); }
+
+    function createMelFilterbank(fftSize, sampleRate, numBands, minHz, maxHz) {
+        const minMel = hzToMel(minHz);
+        const maxMel = hzToMel(maxHz);
+        const melPoints = new Float32Array(numBands + 2);
+        const hzPoints = new Float32Array(numBands + 2);
+        const fftBinIndices = new Uint32Array(numBands + 2);
+        const filterbank = [];
+        for (let i = 0; i < melPoints.length; i++) {
+            melPoints[i] = minMel + i * (maxMel - minMel) / (numBands + 1);
+            hzPoints[i] = melToHz(melPoints[i]);
+            fftBinIndices[i] = Math.floor((fftSize + 1) * hzPoints[i] / sampleRate);
+        }
+        for (let i = 0; i < numBands; i++) {
+            const filter = new Float32Array(fftSize / 2);
+            const startIdx = fftBinIndices[i], centerIdx = fftBinIndices[i + 1], endIdx = fftBinIndices[i + 2];
+            for (let j = startIdx; j < centerIdx; j++) filter[j] = (j - startIdx) / (centerIdx - startIdx);
+            for (let j = centerIdx; j < endIdx; j++) filter[j] = (endIdx - j) / (endIdx - centerIdx);
+            filterbank.push(filter);
+        }
+        return filterbank;
+    }
+
     async function drawSpectrogram(file) {
         if (!audioContext) audioContext = new AudioContext();
         canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
@@ -194,18 +246,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const arrayBuffer = await file.arrayBuffer();
         try {
-            const audioBuffer = await audioContext.decodeData(arrayBuffer);
+            // ** KORREKTUR 1: `decodeAudioData` statt `decodeData` **
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
             const fftSize = 2048;
             const sampleRate = audioBuffer.sampleRate;
-            
-            // ** NEU: Parameter für Mel-Filterbank **
-            const numMelBands = 128; // Vertikale Auflösung des Mel-Spektrogramms
-            const minHz = 100;       // Minimale Frequenz laut Anforderung
-            const maxHz = 5000;      // Maximale Frequenz laut Anforderung
-
-            // ** NEU: Filterbank erstellen **
+            const numMelBands = 128, minHz = 100, maxHz = 5000;
             const melFilterbank = createMelFilterbank(fftSize, sampleRate, numMelBands, minHz, maxHz);
 
+            // ** KORREKTUR 2: `audioBuffer.length` und `sampleRate` direkt nutzen **
             const offlineCtx = new OfflineAudioContext(1, audioBuffer.length, sampleRate);
             const source = offlineCtx.createBufferSource();
             source.buffer = audioBuffer;
@@ -226,7 +274,6 @@ document.addEventListener('DOMContentLoaded', () => {
             source.start(0);
             await offlineCtx.startRendering();
 
-            // ** NEU: Lineares Spektrogramm in Mel-Spektrogramm umwandeln **
             const melSpectrogram = [];
             let maxMelEnergy = 0;
             for (const linearFrame of linearSpectrogram) {
@@ -242,25 +289,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 melSpectrogram.push(melFrame);
             }
 
-            // -- Das eigentliche Zeichnen des Mel-Spektrogramms --
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
             const numSlices = melSpectrogram.length;
             
             for (let i = 0; i < numSlices; i++) {
                 for (let j = 0; j < numMelBands; j++) {
-                    // Energie auf einen Wert zwischen 0 und 1 normalisieren (logarithmisch)
                     const value = Math.log10(1 + melSpectrogram[i][j]) / Math.log10(1 + maxMelEnergy);
-                    
                     const hue = 260 * (1 - value);
-                    const saturation = '100%';
-                    const lightness = `${50 * value}%`;
+                    const saturation = '100%', lightness = `${50 * value}%`;
                     canvasCtx.fillStyle = `hsl(${hue}, ${saturation}, ${lightness})`;
-
                     const x = (i / numSlices) * canvas.width;
                     const y = canvas.height - (j / numMelBands) * canvas.height;
                     const barWidth = (canvas.width / numSlices) + 1;
                     const barHeight = (canvas.height / numMelBands) + 1;
-
                     canvasCtx.fillRect(x, y, barWidth, barHeight);
                 }
             }

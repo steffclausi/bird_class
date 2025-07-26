@@ -3,21 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Kategorisierer (Offline)</title>
+    <title>Lokaler Audio Kategorisierer</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1 id="main-title">Audio Kategorisierer</h1>
+        <h1 id="main-title">Lokaler Audio Kategorisierer</h1>
 
         <div id="upload-section">
-            <p>Wähle den Ordner aus, den du kategorisieren möchtest.</p>
+            <p>
+                Wähle einen Ordner zur lokalen Verarbeitung aus.<br>
+                <strong>Die Dateien bleiben auf deinem Computer und werden nicht hochgeladen.</strong>
+            </p>
             <input type="file" id="file-input" webkitdirectory>
-            <button id="start-button">Ordner laden & Starten</button>
+            <input type="file" id="json-load-input" class="hidden" accept=".json">
+            
+            <div id="start-controls">
+                <button id="start-button">Ordner verarbeiten</button>
+                <button id="load-json-button" disabled>JSON-Fortschritt laden</button>
+            </div>
         </div>
 
         <div id="main-app" class="hidden">
             <div id="info-panel">
+                 <button id="save-json-button">Fortschritt als JSON speichern</button>
                 <p id="file-info">Lädt...</p>
                 <audio id="audio-player" controls></audio>
                 <button id="replay-button">Wiederholen</button>
@@ -42,7 +51,6 @@
              <button id="restart-button">Neue Kategorisierung starten</button>
         </div>
     </div>
-
     <script src="script.js"></script>
 </body>
 </html>
